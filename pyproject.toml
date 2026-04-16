@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "MCP 服务器，为 AI 编码助手提供本地代码质量审查工具"
 readme = "README.md"
 license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.10"
 authors = [
     { name = "AlanNiew", email = "728097735@qq.com" },
@@ -12,7 +13,6 @@ keywords = ["mcp", "code-review", "code-quality", "ai", "coding-assistant"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
@@ -29,7 +29,7 @@ ai-code-review-mcp = "code_review_mcp.server:main"
 
 [build-system]
 requires = ["setuptools>=75.0"]
-build-backend = "setuptools.backends._legacy:_Backend"
+build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["src"]
