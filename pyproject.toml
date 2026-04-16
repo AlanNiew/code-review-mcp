@@ -1,5 +1,5 @@
 [project]
-name = "code-review-mcp"
+name = "ai-code-review-mcp"
 version = "0.1.0"
 description = "MCP 服务器，为 AI 编码助手提供本地代码质量审查工具"
 readme = "README.md"
@@ -25,7 +25,7 @@ dependencies = [
 ]
 
 [project.scripts]
-code-review-mcp = "code_review_mcp.server:main"
+ai-code-review-mcp = "code_review_mcp.server:main"
 
 [build-system]
 requires = ["setuptools>=75.0"]

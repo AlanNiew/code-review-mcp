@@ -1,4 +1,4 @@
-# code-review-mcp
+# ai-code-review-mcp
 
 一个基于 MCP（Model Context Protocol）的代码质量审查服务器，为 AI 编码助手（如 OpenCode、Claude Desktop、Cursor 等）提供本地代码分析能力。
 
@@ -16,7 +16,7 @@
 ### 安装
 
 ```bash
-pip install code-review-mcp
+pip install ai-code-review-mcp
 ```
 
 ### 配置 OpenCode
@@ -29,7 +29,7 @@ pip install code-review-mcp
   "mcp": {
     "code-review-mcp": {
       "type": "local",
-      "command": ["code-review-mcp"],
+      "command": ["ai-code-review-mcp"],
       "enabled": true
     }
   }
@@ -44,7 +44,7 @@ pip install code-review-mcp
 {
   "mcpServers": {
     "code-review-mcp": {
-      "command": "code-review-mcp"
+      "command": "ai-code-review-mcp"
     }
   }
 }
@@ -117,7 +117,7 @@ cp -r skill/ ~/.config/opencode/skills/code-review/
   "mcp": {
     "code-review-mcp": {
       "type": "local",
-      "command": ["uvx", "code-review-mcp"],
+      "command": ["uvx", "ai-code-review-mcp"],
       "enabled": true
     }
   }
