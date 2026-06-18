@@ -1,6 +1,6 @@
 [project]
 name = "ai-code-review-mcp"
-version = "0.1.0"
+version = "0.2.0"
 description = "MCP 服务器，为 AI 编码助手提供本地代码质量审查工具"
 readme = "README.md"
 license = "MIT"
@@ -9,7 +9,7 @@ requires-python = ">=3.10"
 authors = [
     { name = "AlanNiew", email = "728097735@qq.com" },
 ]
-keywords = ["mcp", "code-review", "code-quality", "ai", "coding-assistant"]
+keywords = ["mcp", "code-review", "code-quality", "ai", "coding-assistant", "security", "static-analysis"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
@@ -19,9 +19,21 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Topic :: Software Development :: Quality Assurance",
+    "Topic :: Software Development :: Testing",
+    "Topic :: Security :: Static Analysis",
 ]
 dependencies = [
     "mcp>=1.9.0",
+]
+
+[project.optional-dependencies]
+# YAML 配置文件支持（可选，默认 JSON 即可）
+yaml = ["pyyaml>=6.0"]
+# 开发与测试工具
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=4.0",
+    "ruff>=0.6",
 ]
 
 [project.scripts]
@@ -38,3 +50,54 @@ where = ["src"]
 Homepage = "https://github.com/AlanNiew/code-review-mcp"
 Repository = "https://github.com/AlanNiew/code-review-mcp"
 Issues = "https://github.com/AlanNiew/code-review-mcp/issues"
+Changelog = "https://github.com/AlanNiew/code-review-mcp/blob/main/CHANGELOG.md"
+
+# ==================== Pytest 配置 ====================
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+# 自动把 src 目录加入 sys.path（也通过 conftest.py 双保险）
+pythonpath = ["src"]
+addopts = [
+    "-v",
+    "--strict-markers",
+    "--tb=short",
+]
+
+# ==================== Ruff 配置 ====================
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+extend-exclude = [
+    "dist",
+    "build",
+    ".venv",
+    "node_modules",
+]
+
+[tool.ruff.lint]
+# 启用常用规则集
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "I",    # isort
+    "B",    # flake8-bugbear（部分 bandit 风格）
+    "UP",   # pyupgrade
+    "SIM",  # flake8-simplify
+]
+ignore = [
+    "E501",  # 行长（我们已经有自己的规则）
+    "B008",  # 函数默认值调用（FastAPI Depends 等）
+    "SIM117", # 嵌套 with（可读性比合并更重要）
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = [
+    "B011",  # 测试里允许 assert False
+    "B017",  # 测试里允许 pytest.raises(Exception)
+]
