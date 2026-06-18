@@ -10,9 +10,14 @@
 - **文件分析** — 检测函数复杂度、行数统计、代码风格问题
 - **Diff 审查** — 审查 git 未提交的变更，发现调试代码和潜在密钥泄露
 - **项目扫描** — 一键扫描整个项目的代码质量概况
-- **质量评分** — 为每个文件/项目计算 A-D 等级的质量评分
+- **质量评分** — 多维评分（总分 / 安全 / 可维护性）A-F 等级
+- **21 条规则** — 12 条安全规则（SEC001-SEC012）+ 5 条复杂度规则（COMPLEX001-005）+ 4 条风格规则（STYLE001-004）
+- **认知复杂度** — 业界领先的人脑理解难度算法（SonarSource 白皮书实现）
+- **配置文件** — `.code-review.yml` 自定义规则开关、阈值、忽略路径
+- **行级豁免** — `# codereview: ignore` 灵活豁免误报
 - **多语言支持** — Python 深度分析（AST）+ 通用质量检查（JS/TS/Java/Go/Rust 等）
 - **配套 Skill** — 提供标准化的代码审查工作流提示词
+- **零外部依赖** — 仅依赖 `mcp` 包；YAML 配置可选装 PyYAML
 
 ---
 
@@ -224,11 +229,13 @@ pip install -e .
 
 ---
 
-## 提供的 3 个工具
+## 提供的工具
+
+> v0.2.0 新增了 `list_rules` 工具，可在对话中查询所有已注册规则。
 
 ### 1. `analyze_file` — 分析单个文件
 
-分析文件的代码质量、复杂度和行数统计。
+分析文件的代码质量、复杂度和安全问题。
 
 **示例对话：**
 ```
@@ -236,10 +243,9 @@ pip install -e .
 ```
 
 **返回内容：**
-- 语言类型
-- 代码行数 / 注释行数 / 空白行数
-- 问题列表（函数过长、复杂度过高、参数过多等）
-- 质量评分（A/B/C/D）
+- 语言类型、代码/注释/空白行数
+- 问题列表（21 条规则适用时全部触发）
+- 多维质量评分：overall / security / maintainability（A-F 等级）
 
 ---
 
@@ -270,14 +276,142 @@ pip install -e .
 ```
 
 **返回内容：**
-- 文件总数和总行数
+- 文件总数和总行数、错误/警告/提示计数
 - 语言分布统计
 - 问题最多的前 10 个文件
-- 项目整体质量评分
+- 项目整体质量评分（A-F 等级）
+
+---
+
+### 4. `list_rules` — 查询规则清单（v0.2.0 新增）
+
+返回所有已注册规则的元信息（ID、名称、描述、类别、严重级别、适用语言）。
+
+**示例对话：**
+```
+列出所有代码审查规则
+```
+
+---
+
+## 规则参考
+
+### 安全规则（SEC001-SEC012）
+
+借鉴 [bandit](https://github.com/PyCQA/bandit) 的 AST 节点分发模式，针对 Python。
+
+| 规则 ID | 名称 | 严重级别 | 检测目标 |
+|---------|------|---------|---------|
+| SEC001 | eval-exec | 🔴 error | `eval()` / `exec()` 任意代码执行 |
+| SEC002 | shell-injection | 🔴 error | `subprocess(shell=True)` / `os.system` 命令注入 |
+| SEC003 | unsafe-deserialize | 🔴 error | `pickle.loads` / `yaml.load` 不安全反序列化 |
+| SEC004 | weak-hash | 🟡 warning | `hashlib.md5` / `sha1` 弱哈希 |
+| SEC005 | hardcoded-secret | 🔴 error | 硬编码密码 / API Key |
+| SEC006 | ssl-verify-false | 🔴 error | `requests(verify=False)` 关闭 SSL 校验 |
+| SEC007 | bare-except | 🟡 warning | bare except / `except: pass` 吞异常 |
+| SEC008 | sql-injection | 🟡 warning | SQL 字符串拼接 |
+| SEC009 | assert-in-production | 🔵 info | 生产代码中的 `assert` |
+| SEC010 | flask-debug | 🔴 error | Flask `debug=True` |
+| SEC011 | jwt-no-verify | 🔴 error | JWT 关闭签名校验 |
+| SEC012 | weak-random | 🟡 warning | 安全场景使用 `random` 而非 `secrets` |
+
+### 复杂度规则（COMPLEX001-005）
+
+| 规则 ID | 名称 | 严重级别 | 默认阈值 |
+|---------|------|---------|---------|
+| COMPLEX001 | function-too-long | 🟡 warning | 函数 > 50 行 |
+| COMPLEX002 | cyclomatic-complexity | 🟡 warning | 圈复杂度 > 10 |
+| COMPLEX003 | cognitive-complexity | 🟡 warning | 认知复杂度 > 15（[SonarSource 白皮书](https://www.sonarsource.com/docs/CognitiveComplexity.pdf)）|
+| COMPLEX004 | too-many-params | 🔵 info | 参数 > 5 个 |
+| COMPLEX005 | nesting-too-deep | 🟡 warning | 嵌套 > 4 层 |
+
+### 风格规则（STYLE001-004）
+
+| 规则 ID | 名称 | 严重级别 | 检测目标 |
+|---------|------|---------|---------|
+| STYLE001 | line-too-long | 🟡 warning | 单行 > 120 字符 |
+| STYLE002 | todo-comment | 🔵 info | 注释中的 TODO/FIXME/HACK/XXX |
+| STYLE003 | trailing-whitespace | 🔵 info | 行末空白字符 |
+| STYLE004 | debug-print | 🔵 info | `print` / `console.log` 调试残留 |
+
+---
+
+## 配置文件（v0.2.0 新增）
+
+在项目根目录创建 `.code-review.yml`、`.code-review.yaml` 或 `.code-review.json` 即可自定义行为。
+（YAML 需要可选依赖 `pip install ai-code-review-mcp[yaml]`）
+
+**`.code-review.json` 示例：**
+
+```json
+{
+  "rules": {
+    "security": { "enabled": true },
+    "complexity": { "enabled": true },
+    "style": { "enabled": true }
+  },
+  "thresholds": {
+    "max_function_length": 80,
+    "max_cognitive_complexity": 20,
+    "max_line_length": 100
+  },
+  "ignore_paths": [
+    "tests/*",
+    "vendor/",
+    "migrations/",
+    "*_pb2.py"
+  ],
+  "severity_overrides": {
+    "SEC009": "warning"
+  }
+}
+```
+
+**配置项说明：**
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `rules.<category>.enabled` | bool | 关闭整类规则（如 `rules.style.enabled = false`）|
+| `thresholds.<key>` | int | 自定义阈值（见复杂度规则表）|
+| `ignore_paths` | list | 路径忽略列表（fnmatch glob + 目录前缀）|
+| `severity_overrides` | dict | 覆盖单条规则的默认严重级别 |
+
+**配置查找顺序：**
+1. 环境变量 `CODE_REVIEW_CONFIG` 指定的路径（最高优先级）
+2. 从当前目录向上递归查找 `.code-review.{yml,yaml,json}`
+3. 内置默认配置
+
+---
+
+## 行级豁免（v0.2.0 新增）
+
+借鉴 `# noqa` / `# nosec` 的设计，你可以针对单行豁免规则：
+
+```python
+# 豁免当前行的所有规则
+token = "hardcoded-for-dev-only-1234567890"  # codereview: ignore
+
+# 只豁免指定规则
+password = "test1234"  # codereview: ignore=SEC005
+```
+
+豁免标记大小写不敏感，可以放在行内任意位置。
 
 ---
 
 ## 质量评分算法
+
+### 多维评分（v0.2.0 新增）
+
+每个分析结果包含 3 个独立维度的评分：
+
+| 维度 | 包含的类别 | 用途 |
+|------|-----------|------|
+| **overall** | 所有 issue | 综合质量画像 |
+| **security** | 仅 `security` 类 | 安全风险隔离（"代码漂亮但有 SQL 注入"也能被识别）|
+| **maintainability** | `complexity` / `style` / `debug_code` / `duplication` | 可维护性画像 |
+
+### 严重级别权重
 
 | 严重程度 | 单项扣分 | 说明 |
 |----------|----------|------|
@@ -285,14 +419,15 @@ pip install -e .
 | Warning  | 3 分     | 建议修复（如函数过长） |
 | Info     | 0.5 分   | 可选优化（如 TODO 标记） |
 
-基础分 100，扣完为止。等级划分：
+基础分 100，扣完为止。等级划分（借鉴 DeepSource）：
 
 | 评分 | 等级 | 含义 |
 |------|------|------|
 | ≥ 90 | A    | 优秀 |
-| ≥ 75 | B    | 良好 |
-| ≥ 60 | C    | 一般 |
-| < 60 | D    | 需改进 |
+| ≥ 80 | B    | 良好 |
+| ≥ 70 | C    | 合格 |
+| ≥ 60 | D    | 较差 |
+| < 60 | F    | 不合格 |
 
 ---
 
@@ -319,15 +454,43 @@ pip install -e .
 
 ```
 code-review-mcp/
-├── pyproject.toml                    # Python 包配置
+├── pyproject.toml                    # Python 包配置（含 ruff/pytest 配置）
 ├── README.md                         # 本文件
+├── CHANGELOG.md                      # 变更记录
 ├── LICENSE                           # MIT 许可证
+├── .github/workflows/
+│   ├── ci.yml                        # CI：多版本矩阵 + ruff + pytest
+│   └── publish.yml                   # 自动发布 PyPI + GitHub Release
 ├── skill/
 │   └── SKILL.md                      # 配套的 OpenCode Skill
+├── tests/                            # 测试套件（100 个用例）
+│   ├── conftest.py                   # 共享 fixtures
+│   ├── test_security_rules.py        # SEC001-SEC012 正反例
+│   ├── test_complexity.py            # 认知复杂度算法 + 规则
+│   ├── test_style_rules.py           # 风格规则
+│   ├── test_config.py                # 配置加载 + 行级豁免
+│   ├── test_scoring.py               # 多维评分
+│   └── test_tools.py                 # MCP 工具端到端
 └── src/
     └── code_review_mcp/
-        ├── __init__.py               # 包入口
-        └── server.py                 # MCP 服务器主程序
+        ├── __init__.py
+        ├── server.py                 # MCP 服务器主入口（4 个工具）
+        ├── models.py                 # Issue + Severity + Category 枚举
+        ├── config.py                 # 配置加载 + 行级豁免
+        ├── scoring.py                # 多维评分算法
+        ├── utils.py                  # 通用工具函数
+        ├── analyzers/
+        │   ├── __init__.py
+        │   ├── context.py            # 规则运行入口
+        │   ├── diff.py               # Git diff 分析
+        │   └── project.py            # 项目扫描
+        └── rules/
+            ├── __init__.py
+            ├── base.py               # Rule / PythonAstRule / TextRule 基类
+            ├── registry.py           # 规则注册表
+            ├── security.py           # SEC001-SEC012
+            ├── complexity.py         # COMPLEX001-005（含认知复杂度算法）
+            └── style.py              # STYLE001-004
 ```
 
 ---
