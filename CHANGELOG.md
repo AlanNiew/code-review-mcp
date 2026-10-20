@@ -48,6 +48,9 @@ v0.3 重新划分职责：**工具负责给事实，Skill 负责给判断**。
 - **豁免解析双实现**：`utils` 与 `config` 各有一套 `codereview: ignore` 解析，行为可能漂移；
   统一为单一实现。
 - **`SEC012` 死代码**：计算后未使用的 `sensitive_targets` 已清理。
+- **依赖上限缺失导致干净安装崩溃**：`mcp` 依赖此前只写 `>=1.9.0`，而 mcp 2.x 移除了
+  `mcp.server.fastmcp`（改名 `MCPServer`，API 也有变更），CI 从零安装拿到 2.x 后
+  在收集阶段直接 `ModuleNotFoundError`。现锁定 `mcp>=1.9.0,<2`；迁移到 2.x 另行处理。
 
 #### 🎯 信号精度（dogfood 自审修复）
 

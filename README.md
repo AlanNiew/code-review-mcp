@@ -418,6 +418,10 @@ which ai-code-review-mcp    # macOS/Linux
 
 `review_changes` 依赖 git。非 git 仓库请对单文件用 `analyze_file`；空仓库（还没有 commit）只支持 `working`/`staged`，`base` 模式需要至少一个 commit。
 
+### Q: 为什么依赖锁在 `mcp<2`？
+
+mcp 2.x 移除了 `mcp.server.fastmcp`（改名 `MCPServer` 且 API 有变更），当前代码基于 1.x 的 FastMCP 接口。安装时会自动选 1.x；迁移到 2.x 后会放开这个上限。若你手动把 mcp 升到 2.x，启动会报 `ModuleNotFoundError: No module named 'mcp.server.fastmcp'`，回退到 `mcp<2` 即可。
+
 ### Q: 只想用 MCP，不装 Skill 可以吗？
 
 可以。Skill 是可选的：MCP 工具本身就能返回完整的变更证据包；Skill 的价值是让模型按审查协议验证、定级并如实报告覆盖范围。

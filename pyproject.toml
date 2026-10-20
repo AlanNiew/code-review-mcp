@@ -23,7 +23,9 @@ classifiers = [
     "Topic :: Security :: Static Analysis",
 ]
 dependencies = [
-    "mcp>=1.9.0",
+    # 上限：mcp 2.x 移除了 mcp.server.fastmcp（改名 MCPServer 且 API 有变更），
+    # 未迁移前必须锁在 1.x，否则干净安装会直接 ImportError。
+    "mcp>=1.9.0,<2",
 ]
 
 [project.optional-dependencies]
