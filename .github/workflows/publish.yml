@@ -16,6 +16,7 @@ jobs:
 
     permissions:
       id-token: write  # Trusted Publishing 依赖 OIDC 短时令牌
+      contents: write  # 创建 GitHub Release 需要写 contents（否则 release 步骤 403）
 
     steps:
       - uses: actions/checkout@v4
