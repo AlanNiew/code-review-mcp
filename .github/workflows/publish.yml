@@ -35,9 +35,6 @@ jobs:
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          # 显式启用构建来源证明（attestations），随 OIDC 一起上传
-          attestations: true
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
