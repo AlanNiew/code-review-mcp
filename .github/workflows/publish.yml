@@ -34,44 +34,7 @@ jobs:
         run: python -m build
 
       - name: Publish to PyPI
-        id: publish
         uses: pypa/gh-action-pypi-publish@release/v1
-
-      # 临时诊断：发布失败时把 PyPI Trusted Publisher 的判定结果写进注解，
-      # 注解可被公开读取，便于在没有仓库 admin 权限时定位 claims 不匹配。
-      - name: Diagnose trusted publisher mismatch
-        if: failure()
-        continue-on-error: true
-        shell: bash
-        run: |
-          python - <<'PY'
-          import base64, json, os, urllib.error, urllib.request
-
-          def emit(kind, text):
-              print("::%s::%s" % (kind, " ".join(str(text).split())[:900]))
-
-          url = os.environ["ACTIONS_ID_TOKEN_REQUEST_URL"] + "&audience=pypi"
-          req = urllib.request.Request(
-              url,
-              headers={"Authorization": "bearer " + os.environ["ACTIONS_ID_TOKEN_REQUEST_TOKEN"]},
-          )
-          oidc = json.load(urllib.request.urlopen(req))["value"]
-          payload = oidc.split(".")[1]
-          payload += "=" * (-len(payload) % 4)
-          claims = json.loads(base64.urlsafe_b64decode(payload))
-          emit("warning", "claims=" + json.dumps(claims, separators=(",", ":")))
-
-          mint = urllib.request.Request(
-              "https://pypi.org/_/oidc/mint-token",
-              data=json.dumps({"token": oidc}).encode(),
-              headers={"Content-Type": "application/json"},
-          )
-          try:
-              resp = urllib.request.urlopen(mint)
-              emit("error", "mint-status=%s body=%s" % (resp.status, resp.read()[:600]))
-          except urllib.error.HTTPError as exc:
-              emit("error", "mint-status=%s body=%s" % (exc.code, exc.read()[:600]))
-          PY
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2

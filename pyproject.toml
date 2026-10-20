@@ -20,7 +20,9 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
     "Topic :: Software Development :: Quality Assurance",
     "Topic :: Software Development :: Testing",
-    "Topic :: Security :: Static Analysis",
+    # 注意：PyPI 没有 "Topic :: Security :: Static Analysis" 这个 classifier，
+    # 上传会被 400 拒绝；只保留合法的 "Topic :: Security"。
+    "Topic :: Security",
 ]
 dependencies = [
     # 上限：mcp 2.x 移除了 mcp.server.fastmcp（改名 MCPServer 且 API 有变更），
