@@ -9,11 +9,13 @@ jobs:
   build-and-publish:
     name: Build and publish to PyPI
     runs-on: ubuntu-latest
-    # 仅在可信标签上发布，需要 PyPI API token 配置在 secrets.PYPI_API_TOKEN
+    # 仅在可信标签上发布；通过 PyPI Trusted Publishing（OIDC）认证，
+    # 不需要任何 API token 或 secret。PyPI 侧需配置：
+    # owner=AlanNiew, repo=code-review-mcp, workflow=publish.yml, environment=pypi
     environment: pypi
 
     permissions:
-      id-token: write  # 用于 OIDC trusted publishing
+      id-token: write  # Trusted Publishing 依赖 OIDC 短时令牌
 
     steps:
       - uses: actions/checkout@v4
@@ -34,7 +36,8 @@ jobs:
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
-          password: ${{ secrets.PYPI_API_TOKEN }}
+          # 显式启用构建来源证明（attestations），随 OIDC 一起上传
+          attestations: true
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
