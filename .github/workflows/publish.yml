@@ -40,7 +40,8 @@ jobs:
       # 临时诊断：发布失败时把 PyPI Trusted Publisher 的判定结果写进注解，
       # 注解可被公开读取，便于在没有仓库 admin 权限时定位 claims 不匹配。
       - name: Diagnose trusted publisher mismatch
-        if: steps.publish.outcome == 'failure'
+        if: failure()
+        continue-on-error: true
         shell: bash
         run: |
           python - <<'PY'
