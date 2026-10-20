@@ -58,11 +58,18 @@ class RuleRegistry:
         2. 类别开关（config.is_category_enabled）
         3. 单条规则运行
         4. 行级豁免（# codereview: ignore）
+        5. 按 (line, rule_id, message) 去重并稳定排序（v0.3.0：完全相同的重复输出
+           只保留一条，同一行里同规则的不同命中都保留，便于 diff 与报告）
+
+        config 未显式传入时优先用 ctx.config，最后退回默认配置。
         """
         from ..config import is_issue_suppressed
 
-        config = config or Config()
+        config = config or ctx.config or Config()
         all_issues = []
+        # 去重键：(行号, 规则 ID, 消息)。消息参与去重，一行里两个不同的硬编码密钥
+        # 这类「同规则同行号」的真实命中不会被误合并。
+        seen: set[tuple[int, str, str]] = set()
 
         for rule in self._rules:
             # 1. 语言过滤
@@ -85,10 +92,16 @@ class RuleRegistry:
 
             # 4. 行级豁免过滤
             for issue in issues:
+                key = (issue.line, issue.type, issue.message)
+                if key in seen:
+                    continue
                 if is_issue_suppressed(ctx.source_lines, issue.line, issue.type):
                     continue
+                seen.add(key)
                 all_issues.append(issue)
 
+        # 5. 稳定排序：按行号，再按规则 ID（Python 的 sort 是稳定的）
+        all_issues.sort(key=lambda issue: (issue.line, issue.type))
         return all_issues
 
 

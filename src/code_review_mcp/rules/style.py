@@ -34,7 +34,8 @@ class LineLengthRule(TextRule):
     DEFAULT_SEVERITY: ClassVar[Severity] = Severity.WARNING
 
     def check_line(self, line: str, line_no: int, ctx: RuleContext) -> list:
-        threshold = 120
+        # 阈值来自配置（默认 120 字符）
+        threshold = ctx.threshold("max_line_length", 120)
         stripped = line.rstrip("\r\n")
         if len(stripped) > threshold:
             return [

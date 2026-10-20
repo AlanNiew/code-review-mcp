@@ -1,7 +1,7 @@
 [project]
 name = "ai-code-review-mcp"
-version = "0.2.0"
-description = "MCP 服务器，为 AI 编码助手提供本地代码质量审查工具"
+version = "0.3.0"
+description = "变更驱动的代码审查证据引擎：MCP 服务器 + 审查协议 Skill，为 AI 编码助手提供高信号的变更审查能力"
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]

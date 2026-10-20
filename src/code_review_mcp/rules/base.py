@@ -13,9 +13,13 @@ from __future__ import annotations
 import ast
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import ClassVar
+from typing import TYPE_CHECKING, ClassVar
 
 from ..models import Category, Confidence, Issue, Severity
+
+if TYPE_CHECKING:
+    # 仅用于类型标注：config 依赖 models，运行时导入不会成环，但延迟导入更安全
+    from ..config import Config
 
 
 @dataclass
@@ -27,6 +31,17 @@ class RuleContext:
     tree: ast.AST | None  # Python AST（仅在语言为 python 且解析成功时）
     language: str  # 语言名（小写）
     file_path: str  # 文件路径（用于报告）
+    config: Config | None = None  # 运行时配置；None 时规则使用内置默认值
+
+    def threshold(self, name: str, default: int) -> int:
+        """读取配置中的阈值，没有配置时返回 default。
+
+        所有带阈值的规则统一走这里，保证「配置里的阈值为什么没生效」
+        只有一个排查入口（v0.3.0 修复：此前规则各自硬编码阈值）。
+        """
+        if self.config is None:
+            return default
+        return self.config.threshold(name, default)
 
 
 class Rule(ABC):

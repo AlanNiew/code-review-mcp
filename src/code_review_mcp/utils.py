@@ -126,27 +126,28 @@ def is_ignored_line(line: str) -> bool:
     支持两种形式：
     - `# codereview: ignore`            整行豁免所有规则
     - `# codereview: ignore=SEC001,SEC005`  豁免指定规则
+
+    v0.3.0：解析逻辑统一收敛到 config.get_line_ignored_rules（唯一实现），
+    这里只做布尔包装；用函数内 import 避免 utils ←→ config 的循环导入。
     """
-    return "codereview: ignore" in line.lower()
+    from .config import get_line_ignored_rules
+
+    return get_line_ignored_rules(line) is not None
 
 
 def get_ignored_rule_ids(line: str) -> list[str] | None:
     """从代码行解析被豁免的规则 ID 列表。
 
-    返回 None 表示豁免所有规则；返回空列表表示无效（不豁免）；
+    返回 None 表示「无标记或豁免所有规则」（沿用旧 API 语义）；
     返回非空列表表示只豁免这些规则 ID。
-    """
-    lower = line.lower()
-    marker = "codereview: ignore"
-    idx = lower.find(marker)
-    if idx < 0:
-        return None
 
-    rest = line[idx + len(marker) :]
-    # 形如 `=SEC001,SEC005`
-    if rest.strip().startswith("="):
-        ids_part = rest.strip()[1:]
-        ids = [s.strip().upper() for s in ids_part.split(",") if s.strip()]
-        return ids
-    # 形如 `codereview: ignore`（无 =）→ 豁免所有
-    return None
+    v0.3.0：与 config.get_line_ignored_rules 共用同一份解析实现，
+    避免两套正则/字符串解析逻辑漂移。
+    """
+    from .config import get_line_ignored_rules
+
+    ignored = get_line_ignored_rules(line)
+    # None = 无标记；空集合 = 豁免所有规则（旧 API 两种情况都返回 None）
+    if not ignored:
+        return None
+    return sorted(ignored)

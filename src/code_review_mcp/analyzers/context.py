@@ -17,8 +17,13 @@ def build_context(
     source: str,
     file_path: str,
     language: str | None = None,
+    config: Config | None = None,
 ) -> RuleContext:
-    """构造规则上下文：解析源码、识别语言、构建 Python AST（如适用）。"""
+    """构造规则上下文：解析源码、识别语言、构建 Python AST（如适用）。
+
+    config 会被保存进 RuleContext，规则通过 `ctx.threshold(...)` 读取阈值；
+    不传时规则使用内置默认值（保持旧行为）。
+    """
     if language is None:
         language = detect_language(file_path) or "unknown"
 
@@ -36,6 +41,7 @@ def build_context(
         tree=tree,
         language=language,
         file_path=file_path,
+        config=config,
     )
 
 
@@ -60,8 +66,14 @@ def analyze_file_content(
     if language is None:
         language = detect_language(file_path) or "unknown"
 
+    # 带 BOM 的 UTF-8 在 Python 里合法（utf-8-sig），但 BOM 会让 ast.parse 报语法错误；
+    # 只去掉开头一个 U+FEFF，不改变行号。
+    if source.startswith("\ufeff"):
+        source = source[1:]
+
     line_stats = count_lines(source)
-    ctx = build_context(source, file_path, language)
+    # config 透传给 build_context，规则才能通过 ctx.threshold 读到配置阈值
+    ctx = build_context(source, file_path, language, config)
 
     # 若 AST 解析失败且是 Python，补一个语法错误 issue
     issues: list[Issue] = []

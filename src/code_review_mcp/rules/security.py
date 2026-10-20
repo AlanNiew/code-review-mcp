@@ -307,6 +307,10 @@ class HardcodedSecretRule(PythonAstRule):
     - 变量名包含 password/secret/token/api_key/passwd 等敏感词
     - 赋值的是非空字符串字面量
     - 排除空字符串、明显占位符（<...>、xxx、changeme）
+
+    v0.3.0 修复：此前只检查 `ast.Assign`，漏掉两类真实场景：
+    - 带类型注解的赋值：`token: str = "..."`（ast.AnnAssign）
+    - 调用关键字参数：`connect(password="...")`（关键字名同样按敏感词匹配）
     """
 
     RULE_ID: ClassVar[str] = "SEC005"
@@ -350,40 +354,74 @@ class HardcodedSecretRule(PythonAstRule):
     def visit(self, ctx: RuleContext) -> list:
         issues = []
         for node in ast.walk(ctx.tree):
-            if not isinstance(node, ast.Assign):
-                continue
-            # 只看赋值字符串字面量
-            if not node.value or not isinstance(node.value, ast.Constant):
-                continue
-            if not isinstance(node.value.value, str):
-                continue
-
-            secret_value = node.value.value
-            # 排除空字符串和占位符
-            if not secret_value.strip():
-                continue
-            if any(p in secret_value.lower() for p in self._PLACEHOLDERS):
-                continue
-            # 太短的也排除（可能是变量名占位）
-            if len(secret_value) < 4:
-                continue
-
-            for target in node.targets:
-                if not isinstance(target, ast.Name):
-                    continue
-                var_lower = target.id.lower()
-                if any(kw in var_lower for kw in self._SECRET_KEYWORDS):
-                    issues.append(
-                        self.make_issue(
-                            line=node.lineno,
-                            message=f"变量 `{target.id}` 可能硬编码了密码/密钥",
-                            confidence=Confidence.MEDIUM,
-                            name=target.id,
-                            suggestion="从环境变量或密钥管理服务读取（os.environ / secret manager）",
-                        )
-                    )
-                    break
+            if isinstance(node, ast.Assign):
+                issues.extend(self._check_assignment(node, node.targets))
+            elif isinstance(node, ast.AnnAssign):
+                # 带类型注解的赋值：token: str = "abcdef123456"
+                issues.extend(self._check_assignment(node, [node.target]))
+            elif isinstance(node, ast.Call):
+                # 调用关键字参数：connect(password="hunter2")
+                issues.extend(self._check_call_keywords(node))
         return issues
+
+    def _check_assignment(self, node, targets: list) -> list:
+        """检查赋值语句：目标变量名敏感且值像硬编码密钥。"""
+        if not self._looks_like_secret_value(node.value):
+            return []
+        issues = []
+        for target in targets:
+            if not isinstance(target, ast.Name):
+                continue
+            if self._is_secret_name(target.id):
+                issues.append(
+                    self.make_issue(
+                        line=node.lineno,
+                        message=f"变量 `{target.id}` 可能硬编码了密码/密钥",
+                        confidence=Confidence.MEDIUM,
+                        name=target.id,
+                        suggestion="从环境变量或密钥管理服务读取（os.environ / secret manager）",
+                    )
+                )
+                # 一个赋值只报一次（多目标赋值保留旧行为）
+                break
+        return issues
+
+    def _check_call_keywords(self, node: ast.Call) -> list:
+        """检查调用关键字参数：关键字名敏感且值是字符串字面量。"""
+        issues = []
+        for keyword in node.keywords:
+            if not keyword.arg or not self._is_secret_name(keyword.arg):
+                continue
+            if not self._looks_like_secret_value(keyword.value):
+                continue
+            issues.append(
+                self.make_issue(
+                    line=keyword.value.lineno,
+                    message=f"调用关键字参数 `{keyword.arg}` 可能硬编码了密码/密钥",
+                    confidence=Confidence.MEDIUM,
+                    name=keyword.arg,
+                    suggestion="从环境变量或密钥管理服务读取（os.environ / secret manager）",
+                )
+            )
+        return issues
+
+    def _is_secret_name(self, name: str) -> bool:
+        """变量名 / 关键字参数名是否包含敏感词。"""
+        lower = name.lower()
+        return any(kw in lower for kw in self._SECRET_KEYWORDS)
+
+    def _looks_like_secret_value(self, node) -> bool:
+        """值是否像硬编码密钥：非空、非占位符、长度足够的字符串常量。"""
+        if not isinstance(node, ast.Constant) or not isinstance(node.value, str):
+            return False
+        secret_value = node.value
+        # 排除空字符串和占位符
+        if not secret_value.strip():
+            return False
+        if any(p in secret_value.lower() for p in self._PLACEHOLDERS):
+            return False
+        # 太短的也排除（可能是变量名占位）
+        return len(secret_value) >= 4
 
 
 # ==================== SEC006: SSL 证书校验关闭 ====================
@@ -676,27 +714,6 @@ class WeakRandomRule(PythonAstRule):
 
     def visit(self, ctx: RuleContext) -> list:
         issues = []
-        # 先找出所有"赋值给敏感变量"的赋值
-        sensitive_targets: set[int] = set()  # 节点 id
-        for node in ast.walk(ctx.tree):
-            if isinstance(node, ast.Assign):
-                for target in node.targets:
-                    if isinstance(target, ast.Name):
-                        name_lower = target.id.lower()
-                        if any(
-                            kw in name_lower
-                            for kw in (
-                                "token",
-                                "password",
-                                "secret",
-                                "api_key",
-                                "passwd",
-                                "session",
-                            )
-                        ):
-                            sensitive_targets.add(id(target))
-
-        # 再找对敏感变量的赋值是 random 调用
         for node in ast.walk(ctx.tree):
             if not isinstance(node, ast.Assign):
                 continue

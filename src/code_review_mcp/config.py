@@ -257,14 +257,18 @@ def is_path_ignored(file_path: Path, config: Config) -> bool:
 # ==================== 行级豁免 ====================
 
 # 行级豁免标记：# codereview: ignore[=RULE_ID[,RULE_ID]]
+# v0.3.0：本模块是行级豁免的**唯一实现**，utils.is_ignored_line /
+# utils.get_ignored_rule_ids 已改为委托这里，避免两套解析逻辑漂移。
+# 等号两侧允许空格（兼容旧的 `# codereview: ignore = SEC001` 写法）；
+# 规则 ID 允许小写（旧 utils 实现会整体转小写再解析），解析时统一转大写。
 IGNORE_MARKER = re.compile(
-    r"codereview:\s*ignore(?:=([A-Z0-9_,\s]+))?",
+    r"codereview:\s*ignore(?:\s*=\s*([A-Za-z0-9_,\s]+))?",
     re.IGNORECASE,
 )
 
 
 def get_line_ignored_rules(line: str) -> set[str] | None:
-    """解析一行的豁免标记。
+    """解析一行的豁免标记（行级豁免的唯一实现）。
 
     返回值含义：
     - None：该行无豁免标记

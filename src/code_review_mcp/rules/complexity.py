@@ -14,6 +14,13 @@
 5. 递归调用自身 +1（B5：递归惩罚）
 6. 多行的多个 if 用 elif 连接时不计额外嵌套（平展）
 
+v0.3.0 修正（见 tests/test_engine_hardening.py）：
+- elif 属于 if 链，只 +1、不给嵌套惩罚；旧实现把所有 if 都当新嵌套（含 elif）。
+- else 分支同理：只 +1，不额外加深嵌套层级。
+- BoolOp 只在 visit_BoolOp 里计一次；旧实现先在 if 条件里计一遍，
+  generic_visit 时又计一遍，混合 and/or 会重复计数。
+- 三元表达式作为嵌套结构计入 B2，嵌套三元才能正确累加。
+
 参考：https://www.sonarsource.com/docs/CognitiveComplexity.pdf
 """
 
@@ -42,6 +49,21 @@ _BOOL_OPS = (ast.And, ast.Or)
 # 条件表达式（三元）：a if cond else b 也算决策
 _CONDITIONAL_EXPR = ast.IfExp if hasattr(ast, "IfExp") else None
 
+# 参与「嵌套深度」统计的节点：仅控制流结构。
+# with / async with 属于上下文管理块，不是控制流，按 compute_max_nesting_depth
+# 的注释不计入；async for 与同步版本保持一致，避免漏统计。
+_NESTING_NODES: tuple[type, ...] = (
+    ast.If,
+    ast.For,
+    ast.AsyncFor,
+    ast.While,
+    ast.ExceptHandler,
+    ast.Try,
+    ast.Match,
+)
+if hasattr(ast, "TryStar"):  # pragma: no cover - 仅 Python 3.11+ 存在
+    _NESTING_NODES += (ast.TryStar,)
+
 
 # ==================== 认知复杂度核心算法 ====================
 
@@ -51,64 +73,65 @@ class CognitiveComplexityVisitor(ast.NodeVisitor):
 
     算法状态：
     - self.complexity：累计复杂度
-    - 嵌套深度通过 visit 时传参维护（visit_X 方法不能直接接受额外参数，
-      所以用一个栈）
+    - self._nesting：当前嵌套层级（函数顶层 = 0）
     """
 
     def __init__(self, func_node: ast.AST) -> None:
         self.func_node = func_node
         self.complexity = 0
-        # 嵌套栈：当前所处的嵌套层级（函数顶层 = 0）
+        # 嵌套层级：函数顶层 = 0
         self._nesting = 0
-        # 上一个 if/elif 链的状态：判断 elif 是否平展
-        # 用栈记录每层"最近一次访问过的 If 节点"
-        self._last_if_at_depth: list = []
 
     def _nested_score(self) -> int:
-        """当前节点的得分 = 1 + 嵌套深度。"""
+        """当前节点的得分 = 1（基础增量）+ 嵌套层级（嵌套增量）。"""
         return 1 + self._nesting
 
     # ---- 处理嵌套结构 ----
 
     def _visit_structural(self, node):
-        """通用：先给当前结构加分，再进入子节点。"""
+        """通用：先给当前结构加分，再进入子节点（子节点嵌套层级 +1）。"""
         self.complexity += self._nested_score()
         self._nesting += 1
-        # 维护"最近 if"栈（用于 elif 平展判断）
-        self._last_if_at_depth.append(None)
         self.generic_visit(node)
-        self._last_if_at_depth.pop()
         self._nesting -= 1
 
     def visit_If(self, node):
-        """if / elif 链的特殊处理：elif 不增加嵌套。"""
-        # 判断是不是 elif（直接出现在另一个 if 的 orelse 里）
-        is_elif = self._is_elif_branch(node)
+        """if / elif / else 链：只有 if 计嵌套，elif / else 只加基础增量。"""
+        self._visit_if_node(node, is_elif=False)
+
+    def _visit_if_node(self, node, is_elif: bool) -> None:
+        """处理 if 链中的一个分支。
+
+        elif 是 if 链的延续，只 +1 且不加深嵌套层级（SonarSource 平展规则），
+        否则按 if 结构计分并让 body 的嵌套层级 +1。
+        """
         if is_elif:
-            # elif 平展：+1 但不加嵌套增量
             self.complexity += 1
         else:
             self.complexity += self._nested_score()
             self._nesting += 1
-            self._last_if_at_depth.append(node)
 
-        # 条件中的布尔操作符也要算
-        self._count_bool_ops_in_condition(node.test)
-        self.generic_visit(node)
+        # 条件中的 BoolOp 由 visit_BoolOp 统一计数（此处只负责遍历）
+        self.visit(node.test)
+        for stmt in node.body:
+            self.visit(stmt)
+        self._visit_else_branch(node.orelse)
 
         if not is_elif:
-            self._last_if_at_depth.pop()
             self._nesting -= 1
 
-    def _is_elif_branch(self, node) -> bool:
-        """判断 if 节点是否实际上是 elif（父级 if 的 orelse 中只含这一个 If）。"""
-        # ast 中 elif 表现为：父 if 的 orelse 列表里只有这一个 If
-        # 这里用启发式：如果当前 visit 是从父 if 的 orelse 进入的，
-        # 我们标记为 elif。简化处理：检查最近的同级 if 是否"刚刚被访问"
-        # 由于 generic_visit 不带父信息，这里用一个简化版判断：
-        # 如果 body 只有 1 个 if（即嵌套在 orelse 中），算 elif
-        # 注意：这个判断不完美，但对常见场景已足够准确
-        return False  # 简化：所有 if 都视为新嵌套（保守估计）
+    def _visit_else_branch(self, orelse: list) -> None:
+        """处理 if 的 orelse：elif 递归平展，普通 else 只 +1（无嵌套惩罚）。"""
+        if not orelse:
+            return
+        if len(orelse) == 1 and isinstance(orelse[0], ast.If):
+            # elif：同一条 if 链，继续平展处理
+            self._visit_if_node(orelse[0], is_elif=True)
+            return
+        # 普通 else：B1 基础增量 +1，body 已在 if 的嵌套层级内，不再加深
+        self.complexity += 1
+        for stmt in orelse:
+            self.visit(stmt)
 
     def visit_For(self, node):
         self._visit_structural(node)
@@ -119,6 +142,10 @@ class CognitiveComplexityVisitor(ast.NodeVisitor):
         self._visit_structural(node)
 
     def visit_ExceptHandler(self, node):
+        self._visit_structural(node)
+
+    def visit_Match(self, node):
+        """match 是多分支控制流：+1（嵌套增量随层级），case body 位于更深一层。"""
         self._visit_structural(node)
 
     def visit_With(self, node):
@@ -132,9 +159,11 @@ class CognitiveComplexityVisitor(ast.NodeVisitor):
     # ---- 条件表达式和断言 ----
 
     def visit_IfExp(self, node):
-        """三元表达式 a if cond else b。"""
+        """三元表达式 a if cond else b：属于 B2 嵌套结构。"""
         self.complexity += self._nested_score()
+        self._nesting += 1
         self.generic_visit(node)
+        self._nesting -= 1
 
     def visit_Assert(self, node):
         self.complexity += self._nested_score()
@@ -153,25 +182,14 @@ class CognitiveComplexityVisitor(ast.NodeVisitor):
 
     # ---- 布尔操作序列 ----
 
-    def _count_bool_ops_in_condition(self, node):
-        """统计条件表达式中的布尔操作符序列。
-
-        算法：连续的同类型 (and/or) 操作符作为一个序列，
-        第一个不计，后续每个 +1（不计嵌套）。
-        """
-        if not isinstance(node, ast.BoolOp):
-            return
-        # 同一 BoolOp 节点的 values 数 = 操作数个数，操作符个数 = values - 1
-        # 但 SonarSource 规则：扁平的同类型布尔操作序列每个 +1（不计嵌套）
-        # 这里用简化版：操作数个数 - 1 = 决策点个数
-        self.complexity += len(node.values) - 1
-        # 递归处理嵌套的 BoolOp
-        for value in node.values:
-            self._count_bool_ops_in_condition(value)
-
     def visit_BoolOp(self, node):
-        """顶层的布尔操作（不在 if/while 条件里，例如 a = b or c）。"""
-        self._count_bool_ops_in_condition(node)
+        """布尔操作序列：同一节点的每个操作符 +1，不计嵌套。
+
+        `len(node.values) - 1` 就是本层的操作符个数；嵌套的不同操作符
+        （如 `a and b or c` 中的 or 里再套 and）由 generic_visit 递归到
+        各自的 visit_BoolOp 计数，这里不能再递归统计，否则重复计数。
+        """
+        self.complexity += len(node.values) - 1
         self.generic_visit(node)
 
     # ---- 递归调用 ----
@@ -241,34 +259,35 @@ def compute_cyclomatic_complexity(func_node: ast.AST) -> int:
 
 
 def compute_max_nesting_depth(func_node: ast.AST) -> int:
-    """计算函数体的最大嵌套深度（仅控制流嵌套）。"""
+    """计算函数体的最大嵌套深度（仅控制流嵌套）。
 
-    def depth(node, current=0):
-        max_d = current
+    语义（v0.3.0 按本注释修正）：
+    - 函数体顶层语句深度为 0；每进入一层控制流结构（if/for/while/try/except）
+      深度 +1，即「3 层嵌套 if」= 3、无嵌套函数 = 0。
+    - `with` / `async with` 是上下文管理块而非控制流，不计入深度。
+    - `async for` 与 `for` 一致统计。
+    - 嵌套函数定义单独评分，不并入外层函数。
+    - 单次深度优先遍历取最大值：旧实现对同一子节点递归两次
+      （`depth(child, current)` 与 `depth(child, current + 1)`），
+      深度 n 时调用数达 2^n，大文件会指数级变慢。
+    """
+
+    def depth(node, current: int) -> int:
+        # 嵌套函数单独评分，不把它的控制流算到外层
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            return current
+        next_depth = current + 1 if isinstance(node, _NESTING_NODES) else current
+        max_d = next_depth
         for child in ast.iter_child_nodes(node):
-            # 跳过嵌套函数
-            if (
-                isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef))
-                and child is not func_node
-            ):
-                continue
-            child_d = depth(child, current)
-            if isinstance(
-                child, (ast.If, ast.For, ast.While, ast.With, ast.ExceptHandler, ast.Try)
-            ):
-                child_d = depth(child, current + 1)
-                if child_d > max_d:
-                    max_d = child_d
-            else:
-                cd = depth(child, current)
-                if cd > max_d:
-                    max_d = cd
+            child_d = depth(child, next_depth)
+            if child_d > max_d:
+                max_d = child_d
         return max_d
 
-    # 从函数 body 出发
+    # 从函数 body 出发：顶层语句深度为 0
     max_depth = 0
     for stmt in getattr(func_node, "body", []):
-        d = depth(stmt, 1)
+        d = depth(stmt, 0)
         if d > max_depth:
             max_depth = d
     return max_depth
@@ -287,9 +306,8 @@ class FunctionLengthRule(PythonAstRule):
     DEFAULT_SEVERITY: ClassVar[Severity] = Severity.WARNING
 
     def visit(self, ctx: RuleContext) -> list:
-        # 从 config 读取阈值（如果有的话）
-        threshold = 50
-        # 这里 ctx 不带 config，使用默认值；analyzer 会通过其他路径覆盖
+        # 阈值来自配置（默认 50 行）
+        threshold = ctx.threshold("max_function_length", 50)
         issues = []
         for node in ast.walk(ctx.tree):
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -318,7 +336,7 @@ class CyclomaticComplexityRule(PythonAstRule):
     DEFAULT_SEVERITY: ClassVar[Severity] = Severity.WARNING
 
     def visit(self, ctx: RuleContext) -> list:
-        threshold = 10
+        threshold = ctx.threshold("max_cyclomatic_complexity", 10)
         issues = []
         for node in ast.walk(ctx.tree):
             if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -352,7 +370,7 @@ class CognitiveComplexityRule(PythonAstRule):
     DEFAULT_SEVERITY: ClassVar[Severity] = Severity.WARNING
 
     def visit(self, ctx: RuleContext) -> list:
-        threshold = 15
+        threshold = ctx.threshold("max_cognitive_complexity", 15)
         issues = []
         for node in ast.walk(ctx.tree):
             if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -383,7 +401,7 @@ class ParameterCountRule(PythonAstRule):
     DEFAULT_SEVERITY: ClassVar[Severity] = Severity.INFO
 
     def visit(self, ctx: RuleContext) -> list:
-        threshold = 5
+        threshold = ctx.threshold("max_param_count", 5)
         issues = []
         for node in ast.walk(ctx.tree):
             if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -414,7 +432,7 @@ class NestingDepthRule(PythonAstRule):
     DEFAULT_SEVERITY: ClassVar[Severity] = Severity.WARNING
 
     def visit(self, ctx: RuleContext) -> list:
-        threshold = 4
+        threshold = ctx.threshold("max_nesting_depth", 4)
         issues = []
         for node in ast.walk(ctx.tree):
             if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):

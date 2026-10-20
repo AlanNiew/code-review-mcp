@@ -1,15 +1,14 @@
 """代码审查 MCP 服务器主入口。
 
-提供 3 个 MCP 工具：
-- analyze_file: 分析单个文件的代码质量和复杂度
-- review_diff: 审查 git diff 中的变更
+提供 5 个 MCP 工具：
+- review_changes: 变更审查证据包（v0.3.0 旗舰）
+- analyze_file: 分析单个文件的质量和复杂度
 - check_project: 扫描项目整体代码质量
+- list_rules: 列出已注册规则
+- review_diff: 旧版未提交变更审查（已弃用，保留兼容）
 
-v0.2.0 升级要点：
-- 模块化拆分：rules/analyzers/scoring 各司其职
-- 规则引擎：可注册、可配置开关、支持行级豁免
-- 多维评分：质量分 + 安全分 + 可维护性分
-- 12 条安全规则（SEC001-SEC012）+ 5 条复杂度规则 + 4 条风格规则
+v0.3.0 定位：工具只负责返回**事实**（findings / signals / 复杂度回归），
+不返回审查结论。审查判断与定级由配套 skill 的审查协议完成。
 """
 
 from __future__ import annotations
@@ -23,6 +22,7 @@ from .analyzers import (
     analyze_diff,
     analyze_file_content,
     analyze_project_directory,
+    review_change_set,
 )
 from .config import load_config
 from .rules import registry  # noqa: F401  保证 side effect 注册
@@ -35,13 +35,53 @@ mcp = FastMCP("code-review-mcp")
 
 
 @mcp.tool()
+def review_changes(scope: str = "working", base: str | None = None, directory: str = ".") -> dict:
+    """审查一个 git 变更，返回「审查证据包」：改了哪些文件、风险在哪、新增行命中了什么。
+
+    这是本服务器的旗舰工具。它只返回事实，不返回审查结论——每一条 findings/signal
+    都需要审查者回到源码确认后再决定是否成立、什么级别。
+
+    Args:
+        scope: 审查范围。
+            - "working"（默认）：所有未提交改动 = 未暂存 + 已暂存 + 未跟踪文件（含源码与配置）
+            - "staged"：只审已暂存（git add 过的）
+            - "base"：审 base...HEAD（git merge-base 三点差异），必须同时给 base
+        base: 基线分支/提交，如 "main"、"origin/main"、commit sha；仅 scope="base" 时使用
+        directory: 仓库目录（也可以是仓库内子目录，此时只审该子目录下的变更），
+            默认当前工作目录
+
+    返回：
+        - scope / range / base_commit / head_commit
+        - stats：文件数、增删行、按状态分组、语言分布
+        - files[]：每个变更文件含 path、status、additions、deletions、language、
+          priority（high/medium/low）、signals、findings（只含新增行命中，按行号排序）、
+          function_deltas（Python 函数圈复杂度/长度前后对比）
+        - signals[]：变更级信号（dependency_added / database_schema / ci_or_build /
+          api_contract / test_change / secret_added / security_finding / large_change /
+          config_change）；只有 SEC005（硬编码密钥）记为 secret_added，其余安全命中记为
+          security_finding
+        - focus[]：按风险排序的深审入口（形如 "path:line — 描述"）
+        - limits：skipped（被跳过的文件及原因）、truncated、notes
+
+    使用顺序：focus → priority=high 的文件 → signals → limits。
+    需要看调用方、类型定义、测试时直接读文件；不要只凭本工具输出下结论。
+    非 git 仓库会返回 {"error", "hint"}，单文件场景请改用 analyze_file。
+    """
+    return review_change_set(scope=scope, base=base, repo_root=directory)
+
+
+@mcp.tool()
 def analyze_file(file_path: str) -> dict:
     """分析单个文件的代码质量、复杂度和安全问题。
 
     会运行所有适用的规则：
     - 安全规则（SEC001-SEC012）：eval/exec、shell 注入、pickle、弱哈希、硬编码密钥、SSL 关闭等
     - 复杂度规则（COMPLEX001-005）：函数长度、圈复杂度、认知复杂度、参数个数、嵌套深度
-    - 风格规则（STYLE001-004）：行长、TODO、末尾空白、调试残留
+    - 风格规则（STYLE001-005）：行长、TODO、末尾空白、Python print / JS console.log 调试残留
+
+    返回语言、代码/注释/空白行数、issues（含 rule id、severity、category、confidence、
+    suggestion）与多维评分（overall / security / maintainability，A-F）。
+    评分是文件健康度参考，不是审查结论。
 
     Args:
         file_path: 要分析的文件路径（相对于项目根目录或绝对路径）
@@ -65,9 +105,12 @@ def analyze_file(file_path: str) -> dict:
 
 @mcp.tool()
 def review_diff() -> dict:
-    """审查当前 git 仓库中未提交的变更（staged + unstaged）。
+    """[已弃用] 审查当前 git 仓库中未提交的变更（staged + unstaged）。
 
-    对 diff 中的新增行做以下检测：
+    保留仅为兼容 v0.2.x 调用方；新代码请使用 review_changes，它提供变更级信号、
+    只报新增行、复杂度回归与风险焦点，且覆盖 working/staged/base 三种范围。
+
+    本工具对 diff 新增行做以下检测（DIFF001-DIFF004）：
     - 硬编码的密钥或密码（严重）
     - 遗留的 print/console.log 调试语句
     - 新增的 TODO/FIXME/HACK 标记
@@ -88,6 +131,8 @@ def check_project(directory: str = ".") -> dict:
     - 错误/警告/提示计数
     - 问题最多的前 10 个文件
     - 整体质量评分（A-F 等级）
+
+    适合在不熟悉的仓库里摸底，**不要把它当审查结论**。
 
     Args:
         directory: 要扫描的项目目录路径，默认为当前目录
