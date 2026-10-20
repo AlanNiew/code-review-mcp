@@ -5,6 +5,27 @@
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [0.3.1] - 2026-10-20
+
+### 修复：PyPI 发布链路
+
+0.3.0 是首次通过 GitHub Actions 发布，踩了三个发布期的坑；本版本只修发布与打包，
+**运行时代码与 0.3.0 完全一致**。
+
+#### 🐛 修复
+
+- **Trusted Publishing（OIDC）**：发布工作流不再依赖 `PYPI_API_TOKEN` secret，
+  改为 PyPI Trusted Publishing；仓库 secret 可以删除。
+- **GitHub Release 403**：工作流只声明了 `id-token: write`，创建 Release 还需
+  `contents: write`，已补齐（此前 release 步骤在 PyPI 上传成功后失败）。
+- **400 Bad Request**：`Topic :: Security :: Static Analysis` 不是合法的 PyPI
+  classifier，上传被拒；改为合法的 `Topic :: Security`。
+- 依赖上限 `mcp>=1.9.0,<2` 随 0.3.0 一并发布，干净安装不再解析到 mcp 2.x。
+
+#### 🔧 内部
+
+- 版本号 0.3.0 → 0.3.1。
+
 ## [0.3.0] - 2026-10-20
 
 ### 定位升级：从"lint 报告生成器"到"变更审查证据引擎"
